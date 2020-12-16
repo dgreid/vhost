@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::{mem, slice};
 
 use libc::{c_void, iovec};
-use vmm_sys_util::sock_ctrl_msg::ScmSocket;
+use sys_util::ScmSocket;
 
 use super::message::*;
 use super::{Error, Result};
@@ -126,7 +126,7 @@ impl<R: Req> Endpoint<R> {
             Some(rfds) => rfds,
             _ => &[],
         };
-        self.sock.send_with_fds(iovs, rfds).map_err(Into::into)
+        self.sock.send_bufs_with_fds(iovs, rfds).map_err(Into::into)
     }
 
     /// Sends all bytes from scatter-gather vectors over the socket with optional attached file
@@ -296,11 +296,7 @@ impl<R: Req> Endpoint<R> {
     /// * - SocketError: other socket related errors.
     pub fn recv_data(&mut self, len: usize) -> Result<(usize, Vec<u8>)> {
         let mut rbuf = vec![0u8; len];
-        let mut iovs = [iovec {
-            iov_base: rbuf.as_mut_ptr() as *mut c_void,
-            iov_len: len,
-        }];
-        let (bytes, _) = self.sock.recv_with_fds(&mut iovs, &mut [])?;
+        let (bytes, _) = self.sock.recv_with_fds(&mut rbuf[..], &mut [])?;
         Ok((bytes, rbuf))
     }
 
@@ -323,7 +319,7 @@ impl<R: Req> Endpoint<R> {
     /// * - SocketError: other socket related errors.
     pub fn recv_into_iovec(&mut self, iovs: &mut [iovec]) -> Result<(usize, Option<Vec<RawFd>>)> {
         let mut fd_array = vec![0; MAX_ATTACHED_FD_ENTRIES];
-        let (bytes, fds) = self.sock.recv_with_fds(iovs, &mut fd_array)?;
+        let (bytes, fds) = self.sock.recv_iovecs_with_fds(iovs, &mut fd_array)?;
         let rfds = match fds {
             0 => None,
             n => {
@@ -611,14 +607,10 @@ mod tests {
     use std::fs::File;
     use std::io::{Read, Seek, SeekFrom, Write};
     use std::os::unix::io::FromRawFd;
-    use vmm_sys_util::rand::rand_alphanumerics;
-    use vmm_sys_util::tempfile::TempFile;
+    use tempfile::{tempfile, Builder};
 
     fn temp_path() -> PathBuf {
-        PathBuf::from(format!(
-            "/tmp/vhost_test_{}",
-            rand_alphanumerics(8).to_str().unwrap()
-        ))
+        Builder::new().prefix("/tmp/vhost_test").path().unwrap()
     }
 
     #[test]
@@ -675,7 +667,7 @@ mod tests {
         let sock = listener.accept().unwrap().unwrap();
         let mut slave = Endpoint::<MasterReq>::from_stream(sock);
 
-        let mut fd = TempFile::new().unwrap().into_file();
+        let mut fd = tempfile().unwrap();
         write!(fd, "test").unwrap();
 
         // Normal case for sending/receiving file descriptors

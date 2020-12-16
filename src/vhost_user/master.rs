@@ -9,7 +9,7 @@ use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use vmm_sys_util::eventfd::EventFd;
+use sys_util::EventFd;
 
 use super::connection::Endpoint;
 use super::message::*;
@@ -645,15 +645,12 @@ impl MasterInternal {
 mod tests {
     use super::super::connection::Listener;
     use super::*;
-    use vmm_sys_util::rand::rand_alphanumerics;
+    use tempfile::Builder;
 
     use std::path::PathBuf;
 
     fn temp_path() -> PathBuf {
-        PathBuf::from(format!(
-            "/tmp/vhost_test_{}",
-            rand_alphanumerics(8).to_str().unwrap()
-        ))
+        Builder::new().prefix("/tmp/vhost_test").path().unwrap()
     }
 
     fn create_pair<P: AsRef<Path>>(path: P) -> (Master, Endpoint<MasterReq>) {
